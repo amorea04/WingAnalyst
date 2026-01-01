@@ -1,0 +1,113 @@
+
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wing Analyst - Expert Parapente</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Bibliothèque pour l'export PDF haute qualité -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script>
+      if ('scrollRestoration' in history) {
+        history.scrollRestoration = 'manual';
+      }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Instrument+Serif:italic&display=swap');
+        
+        html, body {
+          height: auto !important;
+          min-height: 100%;
+          scroll-behavior: auto !important; 
+        }
+
+        body { 
+          font-family: 'Outfit', sans-serif;
+          background-color: #fdfaf7;
+        }
+
+        .font-serif {
+          font-family: 'Instrument Serif', serif;
+        }
+
+        /* Style Markdown & Tableaux Premium */
+        .markdown-content {
+          line-height: 1.8;
+          color: #1e293b;
+        }
+
+        .markdown-content table {
+          width: 100%;
+          border-collapse: separate;
+          border-spacing: 0;
+          margin: 2rem 0;
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          overflow: hidden;
+          background: white;
+        }
+        
+        .markdown-content table th {
+          background: #0f172a;
+          color: #ffffff;
+          padding: 1rem;
+          text-align: left;
+          font-size: 0.75rem;
+          font-weight: 700;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+
+        .markdown-content table td {
+          padding: 1rem;
+          border-bottom: 1px solid #f1f5f9;
+          font-size: 0.875rem;
+          color: #334155;
+        }
+
+        /* Classes utilitaires pour l'export PDF */
+        .pdf-export-only {
+          position: fixed;
+          left: -9999px;
+          top: 0;
+          width: 210mm;
+          background: white;
+        }
+
+        .pdf-page-break {
+          page-break-before: always;
+        }
+
+        /* Animations */
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(10px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-in {
+          animation: fadeIn 0.4s ease-out forwards;
+        }
+
+        /* Scrollbar personnalisée */
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #fb923c; border-radius: 10px; }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.3",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.34.0",
+    "react-markdown": "https://esm.sh/react-markdown@^10.1.0",
+    "remark-gfm": "https://esm.sh/remark-gfm@^4.0.0"
+  }
+}
+</script>
+</head>
+<body class="antialiased">
+    <div id="root"></div>
+</body>
+</html>

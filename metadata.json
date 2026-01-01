@@ -1,0 +1,7 @@
+{
+  "name": "Wing Analyst - Choisis ta voile",
+  "description": "Une application d'aide au choix de voile de parapente utilisant l'IA pour analyser les données techniques et les revues d'experts en fonction du profil du pilote.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
