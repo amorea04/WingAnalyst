@@ -24,6 +24,8 @@ const ProfileForm: React.FC<ProfileFormProps> = ({ onComplete }) => {
     }));
   };
 
+  const FLIGHT_OPTIONS = ['Montagne', 'Plaine (Treuil)', 'XC (Cross)', 'Hike & Fly', 'Soaring', 'Freestyle'];
+
   return (
     <div className="bg-white p-8 rounded-[2.5rem] shadow-2xl border border-slate-100 max-w-2xl mx-auto animate-in">
       <h2 className="text-2xl font-black mb-8 flex items-center gap-3">
@@ -68,7 +70,7 @@ const ProfileForm: React.FC<ProfileFormProps> = ({ onComplete }) => {
         <div>
           <label className="block text-sm font-black text-slate-700 mb-4 uppercase tracking-wider">Pratique ciblée</label>
           <div className="flex flex-wrap gap-2">
-            {['Montagne', , 'Plaine (Treuil)', 'XC (Cross)', 'Hike & Fly', 'Soaring', 'Freestyle'].map(type => (
+            {FLIGHT_OPTIONS.map(type => (
               <button
                 key={type}
                 onClick={() => handleToggleFlightType(type)}

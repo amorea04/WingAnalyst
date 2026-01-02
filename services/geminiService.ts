@@ -30,6 +30,20 @@ const MANUFACTURERS = [
   { name: "Neo Paragliders", url: "https://www.neo-paragliders.fr" }
 ];
 
+// Utilitaire pour extraire proprement le JSON même si l'IA ajoute du texte ou des balises markdown
+const extractJSON = (text: string) => {
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      return JSON.parse(jsonMatch[0]);
+    }
+    return JSON.parse(text);
+  } catch (e) {
+    console.error("Erreur de parsing JSON IA:", e, text);
+    return null;
+  }
+};
+
 export const checkProfileCompleteness = async (profile: PilotProfile) => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
   const prompt = `
@@ -47,10 +61,15 @@ export const checkProfileCompleteness = async (profile: PilotProfile) => {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
       contents: prompt,
-      config: { responseMimeType: "application/json" }
+      config: { 
+        responseMimeType: "application/json"
+      }
     });
-    return JSON.parse(response.text || '{"isComplete": true, "questions": []}');
+    
+    const data = extractJSON(response.text || "");
+    return data || { isComplete: true, questions: [] };
   } catch (e) {
+    console.error("Erreur checkProfileCompleteness:", e);
     return { isComplete: true, questions: [] };
   }
 };
@@ -155,18 +174,33 @@ export const analyzeWings = async (profile: PilotProfile, wings: string[], inclu
       model: "gemini-3-pro-preview",
       contents: prompt,
       config: {
-        tools: [{ googleSearch: {} }],
-        thinkingConfig: { thinkingBudget: 8000 }
+        tools: [{ googleSearch: {} }]
       },
     });
 
+    if (!response || !response.text) {
+        throw new Error("Pas de réponse du modèle");
+    }
+
     return {
-      dossier: response.text || "Désolé, l'analyse n'a pas pu être générée.",
+      dossier: response.text,
       sources: (response.candidates?.[0]?.groundingMetadata?.groundingChunks || []) as any[]
     };
   } catch (error) {
-    console.error("Erreur analyzeWings:", error);
-    throw error;
+    console.error("Erreur critique analyzeWings:", error);
+    // Tentative de secours sans outils si l'erreur vient de Google Search
+    try {
+        const backupResponse = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt + "\n\n(IMPORTANT: L'outil de recherche a échoué, utilise tes connaissances internes pour répondre au mieux).",
+        });
+        return {
+            dossier: backupResponse.text || "Erreur de génération.",
+            sources: []
+        };
+    } catch (e2) {
+        throw error;
+    }
   }
 };
 
@@ -175,8 +209,7 @@ export const askFollowUp = async (history: {role: string, text: string}[], lastR
   const chat = ai.chats.create({
     model: "gemini-3-flash-preview",
     config: {
-      systemInstruction: `Tu es l'expert qui a rédigé ce dossier : ${lastReport}. Réponds précisément aux questions techniques du pilote en gardant une rigueur d'ingénieur.
-      Met à jour ${lastReport} si l'utilisateur le demande.`
+      systemInstruction: `Tu es l'expert qui a rédigé ce dossier : ${lastReport}. Réponds précisément aux questions techniques du pilote.`
     }
   });
 

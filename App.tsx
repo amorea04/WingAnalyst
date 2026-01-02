@@ -34,14 +34,15 @@ const App: React.FC = () => {
     setProfile(p);
     setIsChecking(true);
     try {
-      const { isComplete, questions } = await checkProfileCompleteness(p);
-      if (!isComplete && questions.length > 0) {
-        setMissingQuestions(questions);
+      const data = await checkProfileCompleteness(p);
+      if (data && !data.isComplete && data.questions && data.questions.length > 0) {
+        setMissingQuestions(data.questions);
         setStep(AppStep.QUESTIONS);
       } else {
         setStep(AppStep.WINGS);
       }
     } catch (e) {
+      console.error("Erreur lors de la vérification de complétude:", e);
       setStep(AppStep.WINGS);
     } finally {
       setIsChecking(false);
@@ -50,7 +51,7 @@ const App: React.FC = () => {
 
   const handleStartAnalysis = async (w: string[], includeSuggestions: boolean) => {
     if (!profile) return;
-    const finalExperience = profile.experience + (clarifications ? "\n\nCompléments: " + clarifications : "");
+    const finalExperience = profile.experience + (clarifications ? "\n\nCompléments du pilote: " + clarifications : "");
     const finalProfile = { ...profile, experience: finalExperience };
     
     setWings(w);
@@ -59,13 +60,13 @@ const App: React.FC = () => {
     try {
       const data = await analyzeWings(finalProfile, w, includeSuggestions);
       if (!data || !data.dossier) {
-        throw new Error("Réponse vide");
+        throw new Error("Le dossier d'analyse est vide.");
       }
       setResult(data);
       setStep(AppStep.RESULT);
-    } catch (e) {
-      console.error(e);
-      alert("Une erreur technique est survenue.");
+    } catch (e: any) {
+      console.error("Échec de l'analyse:", e);
+      alert(`L'IA n'a pas pu générer le rapport : ${e.message || "Erreur technique"}. Veuillez réessayer dans quelques instants.`);
       setStep(AppStep.WINGS);
     }
   };
@@ -90,7 +91,7 @@ const App: React.FC = () => {
         {step === AppStep.PROFILE && (
           <div className="max-w-2xl mx-auto">
             <ProfileForm onComplete={handleProfileSubmit} />
-            {isChecking && <div className="mt-8 text-center text-orange-600 animate-pulse font-black text-xs uppercase tracking-widest">Calcul de la cohérence de profil...</div>}
+            {isChecking && <div className="mt-8 text-center text-orange-600 animate-pulse font-black text-xs uppercase tracking-widest">Analyse de la complétude du profil...</div>}
           </div>
         )}
 
