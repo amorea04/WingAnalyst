@@ -25,42 +25,43 @@ const extractJSON = (text: string) => {
   }
 };
 
+const handleApiError = (error: any) => {
+  console.error("Gemini API Error:", error);
+  if (error?.message?.includes("429") || error?.status === 429) {
+    throw new Error("QUOTA_EXCEEDED");
+  }
+  throw error;
+};
+
 export const checkProfileCompleteness = async (profile: PilotProfile) => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
-  const prompt = `
-    Analyse ce profil de pilote de parapente :
-    Expérience: ${profile.experience}
-    Ambitions: ${profile.ambitions}
-    PTV: ${profile.ptv}kg
-    Voile actuelle: ${profile.currentWing}
-    Si des informations cruciales manquent, pose 1 à 3 questions max.
-  `;
-
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: prompt,
-    config: { 
-      responseMimeType: "application/json",
-      responseSchema: {
-        type: Type.OBJECT,
-        properties: {
-          isComplete: { type: Type.BOOLEAN },
-          questions: { type: Type.ARRAY, items: { type: Type.STRING } }
-        },
-        required: ["isComplete", "questions"]
+  const prompt = `Analyse ce profil de pilote de parapente et pose 1-3 questions si besoin: Expérience: ${profile.experience}, Ambitions: ${profile.ambitions}, PTV: ${profile.ptv}kg, Voile: ${profile.currentWing}`;
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: prompt,
+      config: { 
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            isComplete: { type: Type.BOOLEAN },
+            questions: { type: Type.ARRAY, items: { type: Type.STRING } }
+          },
+          required: ["isComplete", "questions"]
+        }
       }
-    }
-  });
-  
-  return extractJSON(response.text || "{}") || { isComplete: true, questions: [] };
+    });
+    return extractJSON(response.text || "{}") || { isComplete: true, questions: [] };
+  } catch (error) { return handleApiError(error); }
 };
 
 export const analyzeWings = async (profile: PilotProfile, wings: string[], includeSuggestions: boolean): Promise<AnalysisResult> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
-  const hasWings = wings.length > 0;
   const manufacturersList = MANUFACTURERS.map(m => `- ${m.name}: ${m.url}`).join("\n");
-  const flightTypesStr = profile.flightTypes.join(", ");
-
+  const flightTypesStr = (profile.flightTypes || []).join(", ");
+  const hasWings = wings.length > 0;
+  
   const prompt = `
     Rôle : Tu es un expert senior en ingénierie de parapente et instructeur (notamment en cross XC).
     Ta mission est de produire un dossier technique et pédagogique d'une précision chirurgicale.
@@ -125,6 +126,7 @@ export const analyzeWings = async (profile: PilotProfile, wings: string[], inclu
       
     ## 6. Recommandations Finales
     (Choix n°1 prioritaire et alternatives argumentées)
+    [CHART]
       
     ## 7. Comparaison immersive : ${profile.currentWing} → [Le choix recommandé]
     Comparaison immersive : Quelles sensations attendre en passant de la ${profile.currentWing} à la [Meilleure Voile] ?
@@ -149,8 +151,10 @@ export const analyzeWings = async (profile: PilotProfile, wings: string[], inclu
     Génère un dossier complet et rédigé pour le pilote.
     Utilise Google Search pour les données techniques les plus récentes.
 
+    CONSIGNES TECHNIQUES POUR LE GRAPHIQUE :
+    Tu DOIS inclure le tag [CHART] sur une ligne seule dans la section 6.
     À la TOUTE FIN de ta réponse, après tout le texte, ajoute ce bloc exactement (complète les données) :
-    [CHART_DATA: {"data": [{"label": "Nom de la voile", "metrics": {"safety": 8, "performance": 7, "handling": 9, "accessibility": 8, "speed": 6}}]}]
+    [DATA]{"data": [{"label": "Modèle", "metrics": {"safety": 8, "performance": 7, "handling": 9, "accessibility": 8, "speed": 6}}]}[/DATA]
     Note : metrics sont sur 10. accessibility: 10 = très facile, 1 = voile de compétition.
   `;
 
@@ -162,39 +166,47 @@ export const analyzeWings = async (profile: PilotProfile, wings: string[], inclu
     });
 
     const fullText = response.text || "";
-    const jsonMarker = "[JSON_DATA:";
-    const markerIndex = fullText.indexOf(jsonMarker);
     
     let chartData: RadarData[] | undefined;
     let cleanDossier = fullText;
-
-    if (markerIndex !== -1) {
-      cleanDossier = fullText.substring(0, markerIndex).trim();
-      const jsonPart = fullText.substring(markerIndex + jsonMarker.length);
-      const endMarkerIndex = jsonPart.lastIndexOf("]");
-      if (endMarkerIndex !== -1) {
-        try {
-          const jsonStr = jsonPart.substring(0, endMarkerIndex).replace(/```json|```/g, "").trim();
-          const parsed = JSON.parse(jsonStr);
-          chartData = parsed.data;
-        } catch (e) { console.error("JSON Error", e); }
+    
+    // Extraction plus robuste du bloc [DATA]
+    const dataMatch = fullText.match(/\[DATA\]\s*([\s\S]*?)\s*\[\/DATA\]/);
+    if (dataMatch) {
+      try {
+        let jsonStr = dataMatch[1].trim();
+        // Nettoyage au cas où l'IA ajoute des blocs de code markdown
+        jsonStr = jsonStr.replace(/```json|```/g, "").trim();
+        const parsed = JSON.parse(jsonStr);
+        chartData = parsed.data;
+        // On retire le tag DATA pour ne pas l'afficher dans le rapport
+        cleanDossier = fullText.replace(dataMatch[0], "").trim();
+      } catch (e) {
+        console.error("Erreur JSON Chart:", e, dataMatch[1]);
       }
     }
 
-    return { dossier: cleanDossier, sources: (response.candidates?.[0]?.groundingMetadata?.groundingChunks || []) as any[], chartData };
+    return { 
+      dossier: cleanDossier, 
+      sources: (response.candidates?.[0]?.groundingMetadata?.groundingChunks || []) as any[], 
+      chartData 
+    };
   } catch (error: any) {
+    if (error?.message?.includes("429")) return handleApiError(error);
     const aiBackup = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
     const backup = await aiBackup.models.generateContent({ model: "gemini-3-flash-preview", contents: prompt });
-    return { dossier: backup.text?.split("[JSON_DATA:")[0] || "", sources: [], chartData: undefined };
+    return { dossier: backup.text || "", sources: [], chartData: undefined };
   }
 };
 
 export const askFollowUp = async (history: {role: string, text: string}[], lastReport: string) => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
-  const chat = ai.chats.create({
-    model: "gemini-3-flash-preview",
-    config: { systemInstruction: `Tu es l'expert qui a rédigé ce dossier : ${lastReport}. Réponds précisément.` }
-  });
-  const response = await chat.sendMessage({ message: history[history.length - 1].text });
-  return response.text;
+  try {
+    const chat = ai.chats.create({
+      model: "gemini-3-flash-preview",
+      config: { systemInstruction: `Tu es l'expert qui a rédigé ce dossier : ${lastReport}.` }
+    });
+    const response = await chat.sendMessage({ message: history[history.length - 1].text });
+    return response.text;
+  } catch (error) { return handleApiError(error); }
 };

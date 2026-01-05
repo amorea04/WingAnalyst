@@ -24,7 +24,6 @@ const AnalysisResultView: React.FC<AnalysisResultViewProps> = ({ result, onReset
   const chatEndRef = useRef<HTMLDivElement>(null);
   const reportRef = useRef<HTMLDivElement>(null);
 
-  // Correction Scroll : On utilise requestAnimationFrame pour être sûr que le DOM est peint
   useLayoutEffect(() => {
     const scrollUp = () => {
       window.scrollTo(0, 0);
@@ -32,7 +31,6 @@ const AnalysisResultView: React.FC<AnalysisResultViewProps> = ({ result, onReset
       document.documentElement.scrollTop = 0;
     };
     requestAnimationFrame(scrollUp);
-    // Double sécurité pour les navigateurs capricieux
     setTimeout(scrollUp, 100);
   }, []);
 
@@ -133,13 +131,18 @@ const AnalysisResultView: React.FC<AnalysisResultViewProps> = ({ result, onReset
               remarkPlugins={[remarkGfm]} 
               components={{
                 p: ({children}) => {
-                  // Injection précise du graphique si le paragraphe contient exactement [CHART]
-                  if (typeof children === 'string' && children.trim() === '[CHART]') {
-                    return result.chartData ? (
-                      <div className="my-12 flex justify-center w-full">
+                  // Détection du tag [CHART] même s'il est entouré d'autres textes ou mal formaté
+                  const textContent = React.Children.toArray(children).join("").trim();
+                  if (textContent.includes('[CHART]')) {
+                    return result.chartData && result.chartData.length > 0 ? (
+                      <div className="my-12 flex flex-col items-center w-full overflow-visible">
                         <RadarChart data={result.chartData} />
                       </div>
-                    ) : null;
+                    ) : (
+                      <div className="my-12 p-8 bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl text-center text-slate-400 font-bold italic">
+                        Chargement des données du graphique comparatif...
+                      </div>
+                    );
                   }
                   return <p className="mb-6">{children}</p>;
                 },

@@ -15,12 +15,14 @@ const App: React.FC = () => {
   const [clarifications, setClarifications] = useState<string>('');
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [isChecking, setIsChecking] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   useLayoutEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, [step]);
 
   const handleProfileSubmit = async (p: PilotProfile) => {
+    setErrorMessage(null);
     setProfile(p);
     setIsChecking(true);
     try {
@@ -32,9 +34,12 @@ const App: React.FC = () => {
         setStep(AppStep.WINGS);
       }
     } catch (e: any) {
-      console.error("Erreur profil:", e);
-      // En cas d'erreur technique, on passe à l'étape suivante pour ne pas bloquer l'utilisateur
-      setStep(AppStep.WINGS);
+      if (e.message === "QUOTA_EXCEEDED") {
+        setErrorMessage("L'expert est très sollicité en ce moment (limite gratuite atteinte). Merci de patienter 30 secondes avant de valider à nouveau.");
+      } else {
+        console.error("Erreur profil:", e);
+        setStep(AppStep.WINGS);
+      }
     } finally {
       setIsChecking(false);
     }
@@ -42,6 +47,7 @@ const App: React.FC = () => {
 
   const handleStartAnalysis = async (w: string[], includeSuggestions: boolean) => {
     if (!profile) return;
+    setErrorMessage(null);
     const finalExperience = profile.experience + (clarifications ? "\n\nPrécisions: " + clarifications : "");
     const finalProfile = { ...profile, experience: finalExperience };
     
@@ -54,8 +60,13 @@ const App: React.FC = () => {
       setStep(AppStep.RESULT);
     } catch (e: any) {
       console.error("Erreur analyse:", e);
-      alert(`Erreur d'analyse : ${e.message || "Une erreur inconnue est survenue"}`);
-      setStep(AppStep.WINGS);
+      if (e.message === "QUOTA_EXCEEDED") {
+        alert("L'expert a atteint sa limite de calcul gratuite. Merci d'attendre 1 minute avant de relancer l'analyse.");
+        setStep(AppStep.WINGS);
+      } else {
+        alert(`Erreur d'analyse : ${e.message || "Une erreur inconnue est survenue"}`);
+        setStep(AppStep.WINGS);
+      }
     }
   };
 
@@ -76,6 +87,13 @@ const App: React.FC = () => {
       </header>
 
       <main className="flex-1 container mx-auto px-4 py-12">
+        {errorMessage && (
+          <div className="max-w-2xl mx-auto mb-6 bg-red-50 border-2 border-red-200 p-4 rounded-2xl text-red-700 font-bold text-sm animate-in flex items-center gap-4">
+            <i className="fas fa-exclamation-triangle text-xl"></i>
+            {errorMessage}
+          </div>
+        )}
+
         {step === AppStep.PROFILE && (
           <div className="max-w-2xl mx-auto">
             <ProfileForm onComplete={handleProfileSubmit} />
