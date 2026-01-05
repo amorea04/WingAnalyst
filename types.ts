@@ -14,9 +14,21 @@ export interface GroundingSource {
   };
 }
 
+export interface RadarData {
+  label: string;
+  metrics: {
+    safety: number;      // Sécurité passive
+    performance: number; // Plané / Finesse
+    handling: number;    // Maniabilité / Virage
+    accessibility: number; // Exigence technique (10 = très accessible)
+    speed: number;       // Vitesse / Pénétration
+  };
+}
+
 export interface AnalysisResult {
   dossier: string;
   sources: GroundingSource[];
+  chartData?: RadarData[];
 }
 
 export enum AppStep {

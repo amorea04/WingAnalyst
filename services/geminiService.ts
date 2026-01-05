@@ -1,6 +1,6 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
-import { PilotProfile, AnalysisResult } from "../types";
+import { PilotProfile, AnalysisResult, RadarData } from "../types";
 
 const MANUFACTURERS = [
   { name: "Advance", url: "https://www.advance.swiss/" },
@@ -12,73 +12,54 @@ const MANUFACTURERS = [
   { name: "BGD", url: "https://www.flybgd.com/fr/parapentes/" },
   { name: "AirDesign", url: "https://www.ad-gliders.com/" },
   { name: "Supair", url: "https://www.supair.com/" },
-  { name: "Sky Paragliders", url: "https://www.sky-cz.com/" },
-  { name: "Dudek", url: "https://www.dudek.fr" },
-  { name: "ITV Wings", url: "https://www.itv-wings.com/" },
-  { name: "Level Wings", url: "https://levelwings.com/fr/" },
-  { name: "Little Cloud", url: "https://www.littlecloud.fr" },
-  { name: "Nervures", url: "https://www.nervures.com/" },
-  { name: "Sol Paragliders", url: "https://www.solfrance.fr" },
-  { name: "Swing Paragliders", url: "https://www.swing.de/?lang=fr" },
-  { name: "UP Paragliders", url: "https://up-paragliders.com/" },
-  { name: "Phi-Air", url: "https://phi-air.com" },
-  { name: "Icaro", url: "https://www.icaro-paragliders.com/" },
-  { name: "APCO Aviation", url: "https://www.apcoaviation.com/" },
-  { name: "Mac Para", url: "https://www.macpara.com/" },
-  { name: "Independence", url: "https://www.independence.aero/fr/parapentes/" },
-  { name: "Sky Country", url: "https://sky-country.com/" },
-  { name: "Neo Paragliders", url: "https://www.neo-paragliders.fr" }
+  { name: "Phi-Air", url: "https://phi-air.com" }
 ];
 
-// Utilitaire pour extraire proprement le JSON même si l'IA ajoute du texte ou des balises markdown
 const extractJSON = (text: string) => {
   try {
     const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
+    if (jsonMatch) return JSON.parse(jsonMatch[0]);
     return JSON.parse(text);
   } catch (e) {
-    console.error("Erreur de parsing JSON IA:", e, text);
     return null;
   }
 };
 
 export const checkProfileCompleteness = async (profile: PilotProfile) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   const prompt = `
     Analyse ce profil de pilote de parapente :
     Expérience: ${profile.experience}
     Ambitions: ${profile.ambitions}
     PTV: ${profile.ptv}kg
     Voile actuelle: ${profile.currentWing}
-
-    Si des informations cruciales manquent pour conseiller une aile (ex: nombre d'heures de vol par an, SIV fait, type de sellette), pose 3 questions max.
-    Réponds EXCLUSIVEMENT en JSON : { "isComplete": boolean, "questions": string[] }
+    Si des informations cruciales manquent, pose 1 à 3 questions max.
   `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: { 
-        responseMimeType: "application/json"
+  const response = await ai.models.generateContent({
+    model: "gemini-3-flash-preview",
+    contents: prompt,
+    config: { 
+      responseMimeType: "application/json",
+      responseSchema: {
+        type: Type.OBJECT,
+        properties: {
+          isComplete: { type: Type.BOOLEAN },
+          questions: { type: Type.ARRAY, items: { type: Type.STRING } }
+        },
+        required: ["isComplete", "questions"]
       }
-    });
-    
-    const data = extractJSON(response.text || "");
-    return data || { isComplete: true, questions: [] };
-  } catch (e) {
-    console.error("Erreur checkProfileCompleteness:", e);
-    return { isComplete: true, questions: [] };
-  }
+    }
+  });
+  
+  return extractJSON(response.text || "{}") || { isComplete: true, questions: [] };
 };
 
 export const analyzeWings = async (profile: PilotProfile, wings: string[], includeSuggestions: boolean): Promise<AnalysisResult> => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-  const flightTypesStr = profile.flightTypes.join(", ");
-  const manufacturersList = MANUFACTURERS.map(m => `- ${m.name}: ${m.url}`).join("\n");
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   const hasWings = wings.length > 0;
+  const manufacturersList = MANUFACTURERS.map(m => `- ${m.name}: ${m.url}`).join("\n");
+  const flightTypesStr = profile.flightTypes.join(", ");
 
   const prompt = `
     Rôle : Tu es un expert senior en ingénierie de parapente et instructeur (notamment en cross XC).
@@ -167,57 +148,53 @@ export const analyzeWings = async (profile: PilotProfile, wings: string[], inclu
 
     Génère un dossier complet et rédigé pour le pilote.
     Utilise Google Search pour les données techniques les plus récentes.
+
+    À la TOUTE FIN de ta réponse, après tout le texte, ajoute ce bloc exactement (complète les données) :
+    [CHART_DATA: {"data": [{"label": "Nom de la voile", "metrics": {"safety": 8, "performance": 7, "handling": 9, "accessibility": 8, "speed": 6}}]}]
+    Note : metrics sont sur 10. accessibility: 10 = très facile, 1 = voile de compétition.
   `;
 
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-pro-preview",
       contents: prompt,
-      config: {
-        tools: [{ googleSearch: {} }]
-      },
+      config: { tools: [{ googleSearch: {} }] },
     });
 
-    if (!response || !response.text) {
-        throw new Error("Pas de réponse du modèle");
+    const fullText = response.text || "";
+    const jsonMarker = "[JSON_DATA:";
+    const markerIndex = fullText.indexOf(jsonMarker);
+    
+    let chartData: RadarData[] | undefined;
+    let cleanDossier = fullText;
+
+    if (markerIndex !== -1) {
+      cleanDossier = fullText.substring(0, markerIndex).trim();
+      const jsonPart = fullText.substring(markerIndex + jsonMarker.length);
+      const endMarkerIndex = jsonPart.lastIndexOf("]");
+      if (endMarkerIndex !== -1) {
+        try {
+          const jsonStr = jsonPart.substring(0, endMarkerIndex).replace(/```json|```/g, "").trim();
+          const parsed = JSON.parse(jsonStr);
+          chartData = parsed.data;
+        } catch (e) { console.error("JSON Error", e); }
+      }
     }
 
-    return {
-      dossier: response.text,
-      sources: (response.candidates?.[0]?.groundingMetadata?.groundingChunks || []) as any[]
-    };
-  } catch (error) {
-    console.error("Erreur critique analyzeWings:", error);
-    // Tentative de secours sans outils si l'erreur vient de Google Search
-    try {
-        const backupResponse = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
-            contents: prompt + "\n\n(IMPORTANT: L'outil de recherche a échoué, utilise tes connaissances internes pour répondre au mieux).",
-        });
-        return {
-            dossier: backupResponse.text || "Erreur de génération.",
-            sources: []
-        };
-    } catch (e2) {
-        throw error;
-    }
+    return { dossier: cleanDossier, sources: (response.candidates?.[0]?.groundingMetadata?.groundingChunks || []) as any[], chartData };
+  } catch (error: any) {
+    const aiBackup = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+    const backup = await aiBackup.models.generateContent({ model: "gemini-3-flash-preview", contents: prompt });
+    return { dossier: backup.text?.split("[JSON_DATA:")[0] || "", sources: [], chartData: undefined };
   }
 };
 
 export const askFollowUp = async (history: {role: string, text: string}[], lastReport: string) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   const chat = ai.chats.create({
     model: "gemini-3-flash-preview",
-    config: {
-      systemInstruction: `Tu es l'expert qui a rédigé ce dossier : ${lastReport}. Réponds précisément aux questions techniques du pilote.`
-    }
+    config: { systemInstruction: `Tu es l'expert qui a rédigé ce dossier : ${lastReport}. Réponds précisément.` }
   });
-
-  const lastMessage = history[history.length - 1].text;
-  try {
-    const response = await chat.sendMessage({ message: lastMessage });
-    return response.text;
-  } catch (e) {
-    return "Une erreur technique empêche la réponse.";
-  }
+  const response = await chat.sendMessage({ message: history[history.length - 1].text });
+  return response.text;
 };
