@@ -30,6 +30,8 @@ const MANUFACTURERS = [
   { name: "Neo Paragliders", url: "https://www.neo-paragliders.fr" }
 ];
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 /**
  * Récupération de la clé compatible avec les builds statiques (GitHub Pages)
  * et les environnements de fonctions (Vercel/Netlify).
@@ -40,49 +42,73 @@ const getApiKey = () => {
 };
 
 const handleApiError = (error: any) => {
-  console.error("Gemini API Error:", error);
+  console.error("Gemini API Error details:", error);
   const msg = error?.message || "";
-  if (msg.includes("429") || error?.status === 429) {
+  const status = error?.status;
+  
+  if (msg.includes("429") || status === 429) {
     throw new Error("QUOTA_EXCEEDED");
   }
-  if (msg.includes("API key") || error?.status === 401) {
+  if (msg.includes("API key") || status === 401 || status === 403) {
     throw new Error("API_KEY_INVALID");
   }
   throw error;
 };
 
-export const checkProfileCompleteness = async (profile: PilotProfile) => {
-  const apiKey = getApiKey();
-  const ai = new GoogleGenAI({ apiKey });
-  const prompt = `Analyse ce profil de pilote de parapente et pose 1-3 questions si besoin: Expérience: ${profile.experience}, Ambitions: ${profile.ambitions}, PTV: ${profile.ptv}kg, Voile: ${profile.currentWing}`;
+/**
+ * Encapsule un appel API dans une logique de tentatives (retry)
+ * Utile pour contourner les limitations de débit temporaires.
+ */
+async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 2500): Promise<T> {
   try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: { 
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            isComplete: { type: Type.BOOLEAN },
-            questions: { type: Type.ARRAY, items: { type: Type.STRING } }
-          },
-          required: ["isComplete", "questions"]
+    return await fn();
+  } catch (error: any) {
+    const msg = error?.message || "";
+    // Si c'est une erreur de quota (429) et qu'il reste des tentatives
+    if ((msg.includes("429") || error?.status === 429) && retries > 0) {
+      console.warn(`[API] Limite atteinte. Tentative de retry dans ${delay}ms (${retries} restantes)...`);
+      await sleep(delay);
+      return withRetry(fn, retries - 1, delay * 2); // Délai exponentiel
+    }
+    throw error;
+  }
+}
+
+export const checkProfileCompleteness = async (profile: PilotProfile) => {
+  return withRetry(async () => {
+    const apiKey = getApiKey();
+    const ai = new GoogleGenAI({ apiKey });
+    const prompt = `Analyse ce profil de pilote de parapente et pose 1-3 questions si besoin: Expérience: ${profile.experience}, Ambitions: ${profile.ambitions}, PTV: ${profile.ptv}kg, Voile: ${profile.currentWing}`;
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: { 
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              isComplete: { type: Type.BOOLEAN },
+              questions: { type: Type.ARRAY, items: { type: Type.STRING } }
+            },
+            required: ["isComplete", "questions"]
+          }
         }
-      }
-    });
-    return JSON.parse(response.text || "{}");
-  } catch (error) { return handleApiError(error); }
+      });
+      return JSON.parse(response.text || "{}");
+    } catch (error) { return handleApiError(error); }
+  });
 };
 
 export const analyzeWings = async (profile: PilotProfile, wings: string[], includeSuggestions: boolean): Promise<AnalysisResult> => {
-  const apiKey = getApiKey();
-  const ai = new GoogleGenAI({ apiKey });
-  const flightTypesStr = (profile.flightTypes || []).join(", ");
-  const manufacturersList = MANUFACTURERS.map(m => `- ${m.name}: ${m.url}`).join("\n");
-  const hasWings = wings.length > 0;
-  
-  const prompt = `
+  return withRetry(async () => {
+    const apiKey = getApiKey();
+    const ai = new GoogleGenAI({ apiKey });
+    const flightTypesStr = (profile.flightTypes || []).join(", ");
+    const manufacturersList = MANUFACTURERS.map(m => `- ${m.name}: ${m.url}`).join("\n");
+    const hasWings = wings.length > 0;
+    
+    const prompt = `
     Rôle : Tu es un expert IA senior en ingénierie de parapente et instructeur (notamment en cross XC).
     Ta mission est de produire un dossier technique et pédagogique d'une précision chirurgicale.
 
@@ -178,48 +204,51 @@ export const analyzeWings = async (profile: PilotProfile, wings: string[], inclu
     Note : metrics sont sur 10. accessibility: 10 = très facile, 1 = voile de compétition.
   `;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: prompt,
-      config: { tools: [{ googleSearch: {} }] },
-    });
+    try {
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+        config: { tools: [{ googleSearch: {} }] },
+      });
 
-    const fullText = response.text || "";
-    let chartData: RadarData[] | undefined;
-    let cleanDossier = fullText;
-    
-    const dataMatch = fullText.match(/\[DATA\]\s*([\s\S]*?)\s*\[\/DATA\]/);
-    if (dataMatch) {
-      try {
-        const jsonContent = dataMatch[1].replace(/```json|```/g, "").trim();
-        const parsed = JSON.parse(jsonContent);
-        chartData = parsed.data;
-        cleanDossier = fullText.replace(dataMatch[0], "").trim();
-      } catch (e) {
-        console.error("Erreur parsing JSON Chart:", e);
+      const fullText = response.text || "";
+      let chartData: RadarData[] | undefined;
+      let cleanDossier = fullText;
+      
+      const dataMatch = fullText.match(/\[DATA\]\s*([\s\S]*?)\s*\[\/DATA\]/);
+      if (dataMatch) {
+        try {
+          const jsonContent = dataMatch[1].replace(/```json|```/g, "").trim();
+          const parsed = JSON.parse(jsonContent);
+          chartData = parsed.data;
+          cleanDossier = fullText.replace(dataMatch[0], "").trim();
+        } catch (e) {
+          console.error("Erreur parsing JSON Chart:", e);
+        }
       }
-    }
 
-    return { 
-      dossier: cleanDossier, 
-      sources: (response.candidates?.[0]?.groundingMetadata?.groundingChunks || []) as any[], 
-      chartData 
-    };
-  } catch (error: any) {
-    return handleApiError(error);
-  }
+      return { 
+        dossier: cleanDossier, 
+        sources: (response.candidates?.[0]?.groundingMetadata?.groundingChunks || []) as any[], 
+        chartData 
+      };
+    } catch (error: any) {
+      return handleApiError(error);
+    }
+  });
 };
 
 export const askFollowUp = async (history: {role: string, text: string}[], lastReport: string) => {
-  const apiKey = getApiKey();
-  const ai = new GoogleGenAI({ apiKey });
-  try {
-    const chat = ai.chats.create({
-      model: "gemini-3-flash-preview",
-      config: { systemInstruction: `Tu es l'expert senior en parapente ayant rédigé ce rapport : ${lastReport}. Réponds de manière technique et rassurante.` }
-    });
-    const response = await chat.sendMessage({ message: history[history.length - 1].text });
-    return response.text;
-  } catch (error) { return handleApiError(error); }
+  return withRetry(async () => {
+    const apiKey = getApiKey();
+    const ai = new GoogleGenAI({ apiKey });
+    try {
+      const chat = ai.chats.create({
+        model: "gemini-3-flash-preview",
+        config: { systemInstruction: `Tu es l'expert senior en parapente ayant rédigé ce rapport : ${lastReport}. Réponds de manière technique et rassurante.` }
+      });
+      const response = await chat.sendMessage({ message: history[history.length - 1].text });
+      return response.text;
+    } catch (error) { return handleApiError(error); }
+  });
 };
