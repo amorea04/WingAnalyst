@@ -2,39 +2,10 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { PilotProfile, AnalysisResult, RadarData } from "../types";
 
-const MANUFACTURERS = [
-  { name: "Advance", url: "https://www.advance.swiss/" },
-  { name: "Ozone", url: "https://flyozone.com/paragliders/fr" },
-  { name: "Gin Gliders", url: "https://www.gingliders.com/fr/paragliders/" },
-  { name: "Skywalk", url: "https://www.skywalk.info/" },
-  { name: "Niviuk", url: "https://niviuk.com/" },
-  { name: "Nova", url: "https://www.nova.eu/fr/parapentes/" },
-  { name: "BGD", url: "https://www.flybgd.com/fr/parapentes/" },
-  { name: "AirDesign", url: "https://www.ad-gliders.com/" },
-  { name: "Supair", url: "https://www.supair.com/" },
-  { name: "Sky Paragliders", url: "https://www.sky-cz.com/" },
-  { name: "Dudek", url: "https://www.dudek.fr" },
-  { name: "ITV Wings", url: "https://www.itv-wings.com/" },
-  { name: "Level Wings", url: "https://levelwings.com/fr/" },
-  { name: "Little Cloud", url: "https://www.littlecloud.fr" },
-  { name: "Nervures", url: "https://www.nervures.com/" },
-  { name: "Sol Paragliders", url: "https://www.solfrance.fr" },
-  { name: "Swing Paragliders", url: "https://www.swing.de/?lang=fr" },
-  { name: "UP Paragliders", url: "https://up-paragliders.com/" },
-  { name: "Phi-Air", url: "https://phi-air.com" },
-  { name: "Icaro", url: "https://www.icaro-paragliders.com/" },
-  { name: "APCO Aviation", url: "https://www.apcoaviation.com/" },
-  { name: "Mac Para", url: "https://www.macpara.com/" },
-  { name: "Independence", url: "https://www.independence.aero/fr/parapentes/" },
-  { name: "Sky Country", url: "https://sky-country.com/" },
-  { name: "Neo Paragliders", url: "https://www.neo-paragliders.fr" }
-];
-
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /**
- * Récupération de la clé compatible avec les builds statiques (GitHub Pages)
- * et les environnements de fonctions (Vercel/Netlify).
+ * Récupération de la clé API
  */
 const getApiKey = () => {
   // @ts-ignore
@@ -56,32 +27,34 @@ const handleApiError = (error: any) => {
 };
 
 /**
- * Encapsule un appel API dans une logique de tentatives (retry)
- * Utile pour contourner les limitations de débit temporaires.
+ * Logique de retry améliorée avec délai croissant
  */
-async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 2500): Promise<T> {
+async function withRetry<T>(fn: () => Promise<T>, retries = 3, delay = 3000): Promise<T> {
   try {
     return await fn();
   } catch (error: any) {
     const msg = error?.message || "";
-    // Si c'est une erreur de quota (429) et qu'il reste des tentatives
     if ((msg.includes("429") || error?.status === 429) && retries > 0) {
-      console.warn(`[API] Limite atteinte. Tentative de retry dans ${delay}ms (${retries} restantes)...`);
+      console.warn(`[Quota] Limite atteinte. Nouvelle tentative dans ${delay}ms...`);
       await sleep(delay);
-      return withRetry(fn, retries - 1, delay * 2); // Délai exponentiel
+      return withRetry(fn, retries - 1, delay + 2000);
     }
     throw error;
   }
 }
 
+/**
+ * Utilisation de Gemini Flash Lite pour la vérification (consomme moins de quota)
+ */
 export const checkProfileCompleteness = async (profile: PilotProfile) => {
   return withRetry(async () => {
     const apiKey = getApiKey();
     const ai = new GoogleGenAI({ apiKey });
-    const prompt = `Analyse ce profil de pilote de parapente et pose 1-3 questions si besoin: Expérience: ${profile.experience}, Ambitions: ${profile.ambitions}, PTV: ${profile.ptv}kg, Voile: ${profile.currentWing}`;
+    const prompt = `Analyse ce profil de pilote de parapente et pose 1-3 questions si besoin pour compléter le dossier: Expérience: ${profile.experience}, Ambitions: ${profile.ambitions}, PTV: ${profile.ptv}kg, Voile: ${profile.currentWing}`;
+    
     try {
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-flash-lite-latest", // Modèle ultra-léger pour économiser le quota
         contents: prompt,
         config: { 
           responseMimeType: "application/json",
@@ -101,19 +74,21 @@ export const checkProfileCompleteness = async (profile: PilotProfile) => {
 };
 
 export const analyzeWings = async (profile: PilotProfile, wings: string[], includeSuggestions: boolean): Promise<AnalysisResult> => {
+  // Délai de courtoisie pour laisser respirer l'API entre deux appels
+  await sleep(1500);
+
   return withRetry(async () => {
     const apiKey = getApiKey();
     const ai = new GoogleGenAI({ apiKey });
     const flightTypesStr = (profile.flightTypes || []).join(", ");
-    const manufacturersList = MANUFACTURERS.map(m => `- ${m.name}: ${m.url}`).join("\n");
     const hasWings = wings.length > 0;
     
+    // Prompt optimisé : On ne liste plus les URLs constructeurs pour économiser des milliers de tokens
     const prompt = `
     Rôle : Tu es un expert IA senior en ingénierie de parapente et instructeur (notamment en cross XC).
     Ta mission est de produire un dossier technique et pédagogique d'une précision chirurgicale.
 
-    BASE DE DONNÉES CONSTRUCTEURS (Utilise PRIORITAIREMENT ces sites pour chercher les données techniques réelles via Google Search) :
-    ${manufacturersList}
+    BASE DE DONNÉES CONSTRUCTEURS (Utilise PRIORITAIREMENT les sites constructeurs pour chercher les données techniques réelles via Google Search).
 
     PROFIL DU PILOTE :
     - Expérience actuelle : ${profile.experience}
@@ -222,9 +197,7 @@ export const analyzeWings = async (profile: PilotProfile, wings: string[], inclu
           const parsed = JSON.parse(jsonContent);
           chartData = parsed.data;
           cleanDossier = fullText.replace(dataMatch[0], "").trim();
-        } catch (e) {
-          console.error("Erreur parsing JSON Chart:", e);
-        }
+        } catch (e) { console.error("Data error", e); }
       }
 
       return { 
@@ -245,7 +218,7 @@ export const askFollowUp = async (history: {role: string, text: string}[], lastR
     try {
       const chat = ai.chats.create({
         model: "gemini-3-flash-preview",
-        config: { systemInstruction: `Tu es l'expert senior en parapente ayant rédigé ce rapport : ${lastReport}. Réponds de manière technique et rassurante.` }
+        config: { systemInstruction: `Tu es l'expert senior en parapente ayant rédigé ce rapport : ${lastReport}. Réponds techniquement.` }
       });
       const response = await chat.sendMessage({ message: history[history.length - 1].text });
       return response.text;
