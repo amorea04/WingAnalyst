@@ -30,16 +30,30 @@ const MANUFACTURERS = [
   { name: "Neo Paragliders", url: "https://www.neo-paragliders.fr" }
 ];
 
+/**
+ * Récupération de la clé compatible avec les builds statiques (GitHub Pages)
+ * et les environnements de fonctions (Vercel/Netlify).
+ */
+const getApiKey = () => {
+  // @ts-ignore
+  return process.env.API_KEY || process.env.VITE_API_KEY || (import.meta.env ? import.meta.env.VITE_API_KEY : "");
+};
+
 const handleApiError = (error: any) => {
   console.error("Gemini API Error:", error);
-  if (error?.message?.includes("429") || error?.status === 429) {
+  const msg = error?.message || "";
+  if (msg.includes("429") || error?.status === 429) {
     throw new Error("QUOTA_EXCEEDED");
+  }
+  if (msg.includes("API key") || error?.status === 401) {
+    throw new Error("API_KEY_INVALID");
   }
   throw error;
 };
 
 export const checkProfileCompleteness = async (profile: PilotProfile) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+  const apiKey = getApiKey();
+  const ai = new GoogleGenAI({ apiKey });
   const prompt = `Analyse ce profil de pilote de parapente et pose 1-3 questions si besoin: Expérience: ${profile.experience}, Ambitions: ${profile.ambitions}, PTV: ${profile.ptv}kg, Voile: ${profile.currentWing}`;
   try {
     const response = await ai.models.generateContent({
@@ -62,10 +76,10 @@ export const checkProfileCompleteness = async (profile: PilotProfile) => {
 };
 
 export const analyzeWings = async (profile: PilotProfile, wings: string[], includeSuggestions: boolean): Promise<AnalysisResult> => {
-  // Toujours utiliser Flash pour la gratuité et la rapidité sur Vercel
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
-  const manufacturersList = MANUFACTURERS.map(m => `- ${m.name}: ${m.url}`).join("\n");
+  const apiKey = getApiKey();
+  const ai = new GoogleGenAI({ apiKey });
   const flightTypesStr = (profile.flightTypes || []).join(", ");
+  const manufacturersList = MANUFACTURERS.map(m => `- ${m.name}: ${m.url}`).join("\n");
   const hasWings = wings.length > 0;
   
   const prompt = `
@@ -175,7 +189,6 @@ export const analyzeWings = async (profile: PilotProfile, wings: string[], inclu
     let chartData: RadarData[] | undefined;
     let cleanDossier = fullText;
     
-    // Extraction robuste du bloc DATA
     const dataMatch = fullText.match(/\[DATA\]\s*([\s\S]*?)\s*\[\/DATA\]/);
     if (dataMatch) {
       try {
@@ -199,11 +212,12 @@ export const analyzeWings = async (profile: PilotProfile, wings: string[], inclu
 };
 
 export const askFollowUp = async (history: {role: string, text: string}[], lastReport: string) => {
-  const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
+  const apiKey = getApiKey();
+  const ai = new GoogleGenAI({ apiKey });
   try {
     const chat = ai.chats.create({
       model: "gemini-3-flash-preview",
-      config: { systemInstruction: `Tu es l'expert parapente. Réponds aux questions sur ce dossier : ${lastReport}` }
+      config: { systemInstruction: `Tu es l'expert senior en parapente ayant rédigé ce rapport : ${lastReport}. Réponds de manière technique et rassurante.` }
     });
     const response = await chat.sendMessage({ message: history[history.length - 1].text });
     return response.text;

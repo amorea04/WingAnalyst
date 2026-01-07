@@ -35,9 +35,9 @@ const App: React.FC = () => {
       }
     } catch (e: any) {
       if (e.message === "QUOTA_EXCEEDED") {
-        setErrorMessage("Le service est très sollicité. Réessayez dans quelques instants.");
-      } else if (e.message?.includes("API key")) {
-        setErrorMessage("Erreur de configuration : La clé API est manquante ou invalide sur le serveur.");
+        setErrorMessage("Le service est très sollicité. Réessayez dans 30 secondes.");
+      } else if (e.message === "API_KEY_INVALID" || e.message?.includes("API key")) {
+        setErrorMessage("La clé API configurée est absente ou invalide. Vérifiez vos variables d'environnement (API_KEY) et redéployez l'application.");
       } else {
         console.error("Erreur profil:", e);
         setStep(AppStep.WINGS);
@@ -65,6 +65,9 @@ const App: React.FC = () => {
       if (e.message === "QUOTA_EXCEEDED") {
         setErrorMessage("Quota API dépassé. Merci de patienter 60 secondes.");
         setStep(AppStep.WINGS);
+      } else if (e.message === "API_KEY_INVALID") {
+        setErrorMessage("Erreur de clé API au moment de l'analyse. Vérifiez la configuration du projet.");
+        setStep(AppStep.WINGS);
       } else {
         setErrorMessage(`Une erreur est survenue : ${e.message || "Erreur technique"}`);
         setStep(AppStep.WINGS);
@@ -82,7 +85,7 @@ const App: React.FC = () => {
             </div>
             <div>
               <h1 className="text-2xl font-black tracking-tight leading-none uppercase">WING ANALYST</h1>
-              <p className="text-orange-400 text-[10px] font-black tracking-[0.25em] uppercase mt-1 opacity-90">L'IA T'aide à choisir ta voile !</p>
+              <p className="text-orange-400 text-[10px] font-black tracking-[0.25em] uppercase mt-1 opacity-90">L'IA t'aide à choisir ta voile !</p>
             </div>
           </div>
         </div>
