@@ -1,5 +1,5 @@
 
-import React, { useState, useLayoutEffect, useEffect } from 'react';
+import React, { useState, useLayoutEffect } from 'react';
 import { AppStep, PilotProfile, AnalysisResult } from './types';
 import ProfileForm from './components/ProfileForm';
 import WingInput from './components/WingInput';
@@ -16,31 +16,10 @@ const App: React.FC = () => {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [isChecking, setIsChecking] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [needsKey, setNeedsKey] = useState(false);
 
   useLayoutEffect(() => {
     window.scrollTo({ top: 0, behavior: 'instant' });
   }, [step]);
-
-  useEffect(() => {
-    const checkKey = async () => {
-      if (window.aistudio) {
-        const hasKey = await window.aistudio.hasSelectedApiKey();
-        if (!hasKey && !process.env.API_KEY) {
-          setNeedsKey(true);
-        }
-      }
-    };
-    checkKey();
-  }, []);
-
-  const handleSelectKey = async () => {
-    if (window.aistudio) {
-      await window.aistudio.openSelectKey();
-      setNeedsKey(false);
-      setErrorMessage(null);
-    }
-  };
 
   const handleProfileSubmit = async (p: PilotProfile) => {
     setErrorMessage(null);
@@ -56,9 +35,9 @@ const App: React.FC = () => {
       }
     } catch (e: any) {
       if (e.message === "QUOTA_EXCEEDED") {
-        setErrorMessage("Limite de quota atteinte. Réessayez dans 30 secondes.");
-      } else if (e.message?.includes("API key") || e.status === 401) {
-        setNeedsKey(true);
+        setErrorMessage("Le service est très sollicité. Réessayez dans quelques instants.");
+      } else if (e.message?.includes("API key")) {
+        setErrorMessage("Erreur de configuration : La clé API est manquante ou invalide sur le serveur.");
       } else {
         console.error("Erreur profil:", e);
         setStep(AppStep.WINGS);
@@ -83,43 +62,15 @@ const App: React.FC = () => {
       setStep(AppStep.RESULT);
     } catch (e: any) {
       console.error("Erreur analyse:", e);
-      if (e.message?.includes("Requested entity was not found")) {
-        setNeedsKey(true);
-        setStep(AppStep.WINGS);
-      } else if (e.message === "QUOTA_EXCEEDED") {
-        alert("Quota dépassé. Merci de patienter une minute.");
+      if (e.message === "QUOTA_EXCEEDED") {
+        setErrorMessage("Quota API dépassé. Merci de patienter 60 secondes.");
         setStep(AppStep.WINGS);
       } else {
-        alert(`Erreur : ${e.message || "Une erreur est survenue"}`);
+        setErrorMessage(`Une erreur est survenue : ${e.message || "Erreur technique"}`);
         setStep(AppStep.WINGS);
       }
     }
   };
-
-  if (needsKey) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
-        <div className="max-w-md w-full bg-white p-10 rounded-[2.5rem] shadow-2xl text-center border-2 border-orange-500">
-          <div className="w-20 h-20 bg-orange-100 text-orange-600 rounded-3xl flex items-center justify-center mx-auto mb-6 text-3xl">
-            <i className="fas fa-key"></i>
-          </div>
-          <h2 className="text-2xl font-black mb-4 uppercase">Clé API Requise</h2>
-          <p className="text-slate-500 mb-8 font-medium">
-            Pour utiliser le modèle de calcul avancé, vous devez sélectionner une clé API valide (projet avec facturation activée).
-          </p>
-          <button 
-            onClick={handleSelectKey}
-            className="w-full bg-orange-600 text-white font-black py-5 rounded-2xl shadow-xl hover:bg-orange-500 transition-all mb-4"
-          >
-            SÉLECTIONNER UNE CLÉ
-          </button>
-          <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noopener noreferrer" className="text-xs text-slate-400 hover:text-orange-600 font-bold underline">
-            Documentation sur la facturation API
-          </a>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen flex flex-col bg-slate-50">
@@ -139,9 +90,9 @@ const App: React.FC = () => {
 
       <main className="flex-1 container mx-auto px-4 py-12">
         {errorMessage && (
-          <div className="max-w-2xl mx-auto mb-6 bg-red-50 border-2 border-red-200 p-4 rounded-2xl text-red-700 font-bold text-sm animate-in flex items-center gap-4">
-            <i className="fas fa-exclamation-triangle text-xl"></i>
-            {errorMessage}
+          <div className="max-w-2xl mx-auto mb-6 bg-red-50 border-2 border-red-200 p-6 rounded-2xl text-red-700 font-bold text-sm animate-in flex items-center gap-4 shadow-lg">
+            <i className="fas fa-exclamation-circle text-2xl"></i>
+            <div>{errorMessage}</div>
           </div>
         )}
 

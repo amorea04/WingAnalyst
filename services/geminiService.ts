@@ -62,6 +62,7 @@ export const checkProfileCompleteness = async (profile: PilotProfile) => {
 };
 
 export const analyzeWings = async (profile: PilotProfile, wings: string[], includeSuggestions: boolean): Promise<AnalysisResult> => {
+  // Toujours utiliser Flash pour la gratuité et la rapidité sur Vercel
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
   const manufacturersList = MANUFACTURERS.map(m => `- ${m.name}: ${m.url}`).join("\n");
   const flightTypesStr = (profile.flightTypes || []).join(", ");
@@ -165,7 +166,7 @@ export const analyzeWings = async (profile: PilotProfile, wings: string[], inclu
 
   try {
     const response = await ai.models.generateContent({
-      model: "gemini-3-pro-preview",
+      model: "gemini-3-flash-preview",
       contents: prompt,
       config: { tools: [{ googleSearch: {} }] },
     });
@@ -183,7 +184,7 @@ export const analyzeWings = async (profile: PilotProfile, wings: string[], inclu
         chartData = parsed.data;
         cleanDossier = fullText.replace(dataMatch[0], "").trim();
       } catch (e) {
-        console.error("JSON Error:", e);
+        console.error("Erreur parsing JSON Chart:", e);
       }
     }
 
@@ -202,7 +203,7 @@ export const askFollowUp = async (history: {role: string, text: string}[], lastR
   try {
     const chat = ai.chats.create({
       model: "gemini-3-flash-preview",
-      config: { systemInstruction: `Expert répondant à partir de : ${lastReport}` }
+      config: { systemInstruction: `Tu es l'expert parapente. Réponds aux questions sur ce dossier : ${lastReport}` }
     });
     const response = await chat.sendMessage({ message: history[history.length - 1].text });
     return response.text;
