@@ -12,18 +12,23 @@ const MANUFACTURERS = [
   { name: "BGD", url: "https://www.flybgd.com/fr/parapentes/" },
   { name: "AirDesign", url: "https://www.ad-gliders.com/" },
   { name: "Supair", url: "https://www.supair.com/" },
-  { name: "Phi-Air", url: "https://phi-air.com" }
+  { name: "Sky Paragliders", url: "https://www.sky-cz.com/" },
+  { name: "Dudek", url: "https://www.dudek.fr" },
+  { name: "ITV Wings", url: "https://www.itv-wings.com/" },
+  { name: "Level Wings", url: "https://levelwings.com/fr/" },
+  { name: "Little Cloud", url: "https://www.littlecloud.fr" },
+  { name: "Nervures", url: "https://www.nervures.com/" },
+  { name: "Sol Paragliders", url: "https://www.solfrance.fr" },
+  { name: "Swing Paragliders", url: "https://www.swing.de/?lang=fr" },
+  { name: "UP Paragliders", url: "https://up-paragliders.com/" },
+  { name: "Phi-Air", url: "https://phi-air.com" },
+  { name: "Icaro", url: "https://www.icaro-paragliders.com/" },
+  { name: "APCO Aviation", url: "https://www.apcoaviation.com/" },
+  { name: "Mac Para", url: "https://www.macpara.com/" },
+  { name: "Independence", url: "https://www.independence.aero/fr/parapentes/" },
+  { name: "Sky Country", url: "https://sky-country.com/" },
+  { name: "Neo Paragliders", url: "https://www.neo-paragliders.fr" }
 ];
-
-const extractJSON = (text: string) => {
-  try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) return JSON.parse(jsonMatch[0]);
-    return JSON.parse(text);
-  } catch (e) {
-    return null;
-  }
-};
 
 const handleApiError = (error: any) => {
   console.error("Gemini API Error:", error);
@@ -52,7 +57,7 @@ export const checkProfileCompleteness = async (profile: PilotProfile) => {
         }
       }
     });
-    return extractJSON(response.text || "{}") || { isComplete: true, questions: [] };
+    return JSON.parse(response.text || "{}");
   } catch (error) { return handleApiError(error); }
 };
 
@@ -63,7 +68,7 @@ export const analyzeWings = async (profile: PilotProfile, wings: string[], inclu
   const hasWings = wings.length > 0;
   
   const prompt = `
-    Rôle : Tu es un expert senior en ingénierie de parapente et instructeur (notamment en cross XC).
+    Rôle : Tu es un expert IA senior en ingénierie de parapente et instructeur (notamment en cross XC).
     Ta mission est de produire un dossier technique et pédagogique d'une précision chirurgicale.
 
     BASE DE DONNÉES CONSTRUCTEURS (Utilise PRIORITAIREMENT ces sites pour chercher les données techniques réelles via Google Search) :
@@ -166,23 +171,19 @@ export const analyzeWings = async (profile: PilotProfile, wings: string[], inclu
     });
 
     const fullText = response.text || "";
-    
     let chartData: RadarData[] | undefined;
     let cleanDossier = fullText;
     
-    // Extraction plus robuste du bloc [DATA]
+    // Extraction robuste du bloc DATA
     const dataMatch = fullText.match(/\[DATA\]\s*([\s\S]*?)\s*\[\/DATA\]/);
     if (dataMatch) {
       try {
-        let jsonStr = dataMatch[1].trim();
-        // Nettoyage au cas où l'IA ajoute des blocs de code markdown
-        jsonStr = jsonStr.replace(/```json|```/g, "").trim();
-        const parsed = JSON.parse(jsonStr);
+        const jsonContent = dataMatch[1].replace(/```json|```/g, "").trim();
+        const parsed = JSON.parse(jsonContent);
         chartData = parsed.data;
-        // On retire le tag DATA pour ne pas l'afficher dans le rapport
         cleanDossier = fullText.replace(dataMatch[0], "").trim();
       } catch (e) {
-        console.error("Erreur JSON Chart:", e, dataMatch[1]);
+        console.error("JSON Error:", e);
       }
     }
 
@@ -192,10 +193,7 @@ export const analyzeWings = async (profile: PilotProfile, wings: string[], inclu
       chartData 
     };
   } catch (error: any) {
-    if (error?.message?.includes("429")) return handleApiError(error);
-    const aiBackup = new GoogleGenAI({ apiKey: process.env.API_KEY || "" });
-    const backup = await aiBackup.models.generateContent({ model: "gemini-3-flash-preview", contents: prompt });
-    return { dossier: backup.text || "", sources: [], chartData: undefined };
+    return handleApiError(error);
   }
 };
 
@@ -204,7 +202,7 @@ export const askFollowUp = async (history: {role: string, text: string}[], lastR
   try {
     const chat = ai.chats.create({
       model: "gemini-3-flash-preview",
-      config: { systemInstruction: `Tu es l'expert qui a rédigé ce dossier : ${lastReport}.` }
+      config: { systemInstruction: `Expert répondant à partir de : ${lastReport}` }
     });
     const response = await chat.sendMessage({ message: history[history.length - 1].text });
     return response.text;

@@ -25,13 +25,7 @@ const AnalysisResultView: React.FC<AnalysisResultViewProps> = ({ result, onReset
   const reportRef = useRef<HTMLDivElement>(null);
 
   useLayoutEffect(() => {
-    const scrollUp = () => {
-      window.scrollTo(0, 0);
-      document.body.scrollTop = 0;
-      document.documentElement.scrollTop = 0;
-    };
-    requestAnimationFrame(scrollUp);
-    setTimeout(scrollUp, 100);
+    window.scrollTo(0, 0);
   }, []);
 
   const handleSendMessage = async () => {
@@ -42,7 +36,7 @@ const AnalysisResultView: React.FC<AnalysisResultViewProps> = ({ result, onReset
     setIsTyping(true);
     try {
       const response = await askFollowUp([...chatHistory, newUserMsg], editableDossier);
-      setChatHistory(prev => [...prev, { role: 'model', text: response || 'Erreur de réponse.' }]);
+      setChatHistory(prev => [...prev, { role: 'model', text: response || 'Erreur.' }]);
     } catch (e) {
       setChatHistory(prev => [...prev, { role: 'model', text: 'Erreur technique.' }]);
     } finally {
@@ -51,32 +45,20 @@ const AnalysisResultView: React.FC<AnalysisResultViewProps> = ({ result, onReset
   };
 
   const generatePDF = async () => {
-    if (isEditing) setIsEditing(false);
     setIsExporting(true);
-    
     setTimeout(async () => {
       const element = reportRef.current;
-      if (!element) {
-        setIsExporting(false);
-        return;
-      }
-      
+      if (!element) return;
       const opt = {
         margin: 10,
         filename: 'Expertise_WingAnalyst.pdf',
         image: { type: 'jpeg', quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, logging: false },
+        html2canvas: { scale: 2, useCORS: true },
         jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
       };
-      
-      try {
-        await html2pdf().set(opt).from(element).save();
-      } catch (err) {
-        console.error("PDF Error:", err);
-      } finally {
-        setIsExporting(false);
-      }
-    }, 800);
+      await html2pdf().set(opt).from(element).save();
+      setIsExporting(false);
+    }, 500);
   };
 
   useEffect(() => {
@@ -85,7 +67,6 @@ const AnalysisResultView: React.FC<AnalysisResultViewProps> = ({ result, onReset
 
   return (
     <div className="max-w-6xl mx-auto space-y-10 pb-24 px-4 animate-in">
-      {/* Barre d'outils */}
       <div className="flex flex-col lg:flex-row items-center justify-between gap-6 bg-slate-900 text-white p-6 md:p-8 rounded-[2rem] shadow-2xl border border-white/10 no-print">
         <div className="flex items-center gap-5">
           <div className="w-12 h-12 bg-orange-600 rounded-xl flex items-center justify-center shadow-lg shadow-orange-500/30">
@@ -101,48 +82,29 @@ const AnalysisResultView: React.FC<AnalysisResultViewProps> = ({ result, onReset
           <button onClick={() => setIsEditing(!isEditing)} className={`${isEditing ? 'bg-orange-500' : 'bg-white/10'} hover:opacity-90 px-5 py-2.5 rounded-xl transition-all font-bold text-xs flex items-center gap-2`}>
             <i className={`fas ${isEditing ? 'fa-check' : 'fa-pen'}`}></i> {isEditing ? 'Valider' : 'Éditer'}
           </button>
-          <button 
-            onClick={generatePDF} 
-            disabled={isExporting} 
-            className="bg-orange-600 hover:bg-orange-500 px-5 py-2.5 rounded-xl transition-all font-bold text-xs flex items-center gap-2 shadow-lg disabled:opacity-50"
-          >
-            <i className={isExporting ? "fas fa-spinner fa-spin" : "fas fa-file-pdf"}></i> 
-            {isExporting ? 'Export...' : 'PDF'}
+          <button onClick={generatePDF} disabled={isExporting} className="bg-orange-600 hover:bg-orange-500 px-5 py-2.5 rounded-xl transition-all font-bold text-xs flex items-center gap-2 shadow-lg disabled:opacity-50">
+            <i className={isExporting ? "fas fa-spinner fa-spin" : "fas fa-file-pdf"}></i> {isExporting ? 'Export...' : 'PDF'}
           </button>
-          <button onClick={onReset} className="bg-slate-700 hover:bg-slate-600 px-5 py-2.5 rounded-xl transition-all font-bold text-xs">
-            Nouveau Profil
-          </button>
+          <button onClick={onReset} className="bg-slate-700 hover:bg-slate-600 px-5 py-2.5 rounded-xl transition-all font-bold text-xs">Nouveau Profil</button>
         </div>
       </div>
 
-      <article 
-        ref={reportRef}
-        className={`bg-white rounded-[2.5rem] shadow-xl border border-slate-100 transition-all ${isEditing ? 'p-4' : 'p-8 md:p-16'}`}
-      >
+      <article ref={reportRef} className={`bg-white rounded-[2.5rem] shadow-xl border border-slate-100 transition-all ${isEditing ? 'p-4' : 'p-8 md:p-16'}`}>
         {isEditing ? (
-          <textarea
-            className="w-full min-h-[600px] p-8 border-2 border-slate-100 rounded-3xl font-mono text-sm text-slate-700 bg-slate-50 outline-none"
-            value={editableDossier}
-            onChange={(e) => setEditableDossier(e.target.value)}
-          />
+          <textarea className="w-full min-h-[600px] p-8 border-2 border-slate-100 rounded-3xl font-mono text-sm text-slate-700 bg-slate-50 outline-none" value={editableDossier} onChange={(e) => setEditableDossier(e.target.value)} />
         ) : (
           <div className="markdown-content">
             <ReactMarkdown 
               remarkPlugins={[remarkGfm]} 
               components={{
                 p: ({children}) => {
-                  // Détection du tag [CHART] même s'il est entouré d'autres textes ou mal formaté
-                  const textContent = React.Children.toArray(children).join("").trim();
-                  if (textContent.includes('[CHART]')) {
+                  const content = React.Children.toArray(children).join("");
+                  if (content.includes('[CHART]')) {
                     return result.chartData && result.chartData.length > 0 ? (
-                      <div className="my-12 flex flex-col items-center w-full overflow-visible">
+                      <div className="my-12 flex flex-col items-center w-full">
                         <RadarChart data={result.chartData} />
                       </div>
-                    ) : (
-                      <div className="my-12 p-8 bg-slate-50 border-2 border-dashed border-slate-200 rounded-3xl text-center text-slate-400 font-bold italic">
-                        Chargement des données du graphique comparatif...
-                      </div>
-                    );
+                    ) : null;
                   }
                   return <p className="mb-6">{children}</p>;
                 },
@@ -153,28 +115,12 @@ const AnalysisResultView: React.FC<AnalysisResultViewProps> = ({ result, onReset
             >
               {editableDossier}
             </ReactMarkdown>
-
-            {result.sources && result.sources.length > 0 && (
-              <div className="mt-16 pt-8 border-t border-slate-100 no-print">
-                <h3 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6">Sources consultées</h3>
-                <div className="flex flex-wrap gap-3">
-                  {result.sources.map((source, idx) => source.web && (
-                    <a key={idx} href={source.web.uri} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 bg-slate-50 hover:bg-orange-50 text-slate-600 px-4 py-2 rounded-xl border border-slate-100 transition-all text-xs font-bold">
-                      <i className="fas fa-external-link-alt"></i> {source.web.title}
-                    </a>
-                  ))}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </article>
 
-      {/* Dialogue Expert */}
       <div className="bg-slate-900 rounded-[2.5rem] p-8 md:p-12 text-white shadow-2xl border border-white/5 no-print">
-        <h3 className="text-xl font-bold mb-8 flex items-center gap-4 text-orange-400">
-          <i className="fas fa-comments"></i> Dialogue Expert
-        </h3>
+        <h3 className="text-xl font-bold mb-8 flex items-center gap-4 text-orange-400"><i className="fas fa-comments"></i> Dialogue Expert</h3>
         <div className="space-y-6 mb-8 max-h-[400px] overflow-y-auto pr-4 custom-scrollbar">
           {chatHistory.map((msg, idx) => (
             <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
